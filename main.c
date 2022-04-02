@@ -68,7 +68,7 @@
 #include "ble_dis.h"
 #include "ble_conn_params.h"
 #include "sensorsim.h"
-#include "bsp_btn_ble.h"
+//#include "bsp_btn_ble.h"
 #include "app_scheduler.h"
 #include "nrf_sdh.h"
 #include "nrf_sdh_soc.h"
@@ -86,6 +86,38 @@
 #include "nrf_log.h"
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
+
+#include "nrf_gpio.h"
+#include "nrf_drv_gpiote.h"
+#include "app_button.h"
+#include "nrf_drv_saadc.h"
+
+typedef struct Flag
+{
+    uint8_t ble_conn    :1 ;
+    uint8_t ble_disconn :1 ;
+    uint8_t joystick_xy :1 ;   
+    uint8_t trigger     :1 ;
+    uint8_t pretrigger  :1 ;
+    uint8_t track       :1 ;
+    uint8_t sleep       :1 ;
+}Flag;
+volatile Flag sys = {0,0,0,0,0,0,0} ;
+
+#define LEFT      31
+#define RIGHT     30
+#define MIDDLE    29
+#define FORWARD   28
+#define BACKWARD  27
+void in_pin_handler(uint8_t pin_no, uint8_t button_action);
+static const app_button_cfg_t app_buttons[5] =
+{
+    {LEFT     , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
+    {RIGHT    , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
+    {MIDDLE   , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
+    {FORWARD  , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
+    {BACKWARD , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
+};
 
 
 #define DEVICE_NAME                     "nRF5_Mouse"                                /**< Name of device. Will be included in the advertising data. */
@@ -160,9 +192,13 @@
 #define APP_ADV_FAST_DURATION           3000                                        /**< The advertising duration of fast advertising in units of 10 milliseconds. */
 #define APP_ADV_SLOW_DURATION           18000                                       /**< The advertising duration of slow advertising in units of 10 milliseconds. */
 
+#define JOYSTICK_MEAS_INTERVAL          APP_TIMER_TICKS(20)                       /**< JOYSTICK measurement interval (ticks). */
+
 
 APP_TIMER_DEF(m_battery_timer_id);                                                  /**< Battery timer. */
 BLE_BAS_DEF(m_bas);                                                                 /**< Battery service instance. */
+
+APP_TIMER_DEF(m_joystick_timer_id);                                                  /**< joystick timer. */
 BLE_HIDS_DEF(m_hids,                                                                /**< HID service instance. */
              NRF_SDH_BLE_TOTAL_LINK_COUNT,
              INPUT_REP_BUTTONS_LEN,
@@ -210,7 +246,7 @@ static ble_gap_adv_data_t m_sp_advdata_buf =                                    
 #endif
 
 static void on_hids_evt(ble_hids_t * p_hids, ble_hids_evt_t * p_evt);
-
+static void mouse_movement_send(int16_t x_delta, int16_t y_delta);
 
 /**@brief Callback function for asserts in the SoftDevice.
  *
@@ -391,6 +427,13 @@ static void battery_level_meas_timeout_handler(void * p_context)
 }
 
 
+static void joystick_meas_timeout_handler(void * p_context)
+{
+    UNUSED_PARAMETER(p_context);
+    sys.joystick_xy = 1 ;   
+}
+
+
 /**@brief Function for the Timer initialization.
  *
  * @details Initializes the timer module.
@@ -406,6 +449,11 @@ static void timers_init(void)
     err_code = app_timer_create(&m_battery_timer_id,
                                 APP_TIMER_MODE_REPEATED,
                                 battery_level_meas_timeout_handler);
+
+    err_code = app_timer_create(&m_joystick_timer_id,
+                                APP_TIMER_MODE_REPEATED,
+                                joystick_meas_timeout_handler);
+
     APP_ERROR_CHECK(err_code);
 }
 
@@ -749,6 +797,9 @@ static void timers_start(void)
 
     err_code = app_timer_start(m_battery_timer_id, BATTERY_LEVEL_MEAS_INTERVAL, NULL);
     APP_ERROR_CHECK(err_code);
+
+//    err_code = app_timer_start(m_joystick_timer_id, JOYSTICK_MEAS_INTERVAL, NULL);
+//    APP_ERROR_CHECK(err_code);
 }
 
 
@@ -760,12 +811,12 @@ static void sleep_mode_enter(void)
 {
     ret_code_t err_code;
 
-    err_code = bsp_indication_set(BSP_INDICATE_IDLE);
-    APP_ERROR_CHECK(err_code);
-
-    // Prepare wakeup buttons.
-    err_code = bsp_btn_ble_sleep_mode_prepare();
-    APP_ERROR_CHECK(err_code);
+//    err_code = bsp_indication_set(BSP_INDICATE_IDLE);
+//    APP_ERROR_CHECK(err_code);
+//
+//    // Prepare wakeup buttons.
+//    err_code = bsp_btn_ble_sleep_mode_prepare();
+//    APP_ERROR_CHECK(err_code);
 
     // Go to system-off mode (this function will not return; wakeup will cause a reset).
     err_code = sd_power_system_off();
@@ -816,8 +867,8 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
     {
         case BLE_ADV_EVT_DIRECTED_HIGH_DUTY:
             NRF_LOG_INFO("Directed advertising.");
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_DIRECTED);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_DIRECTED);
+//            APP_ERROR_CHECK(err_code);
             break;
 
         case BLE_ADV_EVT_FAST:
@@ -826,33 +877,33 @@ static void on_adv_evt(ble_adv_evt_t ble_adv_evt)
             err_code = ble_advertising_advdata_update(&m_advertising, &m_sp_advdata_buf, false);
             APP_ERROR_CHECK(err_code);
 #endif
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING);
+//            APP_ERROR_CHECK(err_code);
             break;
 
         case BLE_ADV_EVT_SLOW:
             NRF_LOG_INFO("Slow advertising.");
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_SLOW);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_SLOW);
+//            APP_ERROR_CHECK(err_code);
             break;
 
         case BLE_ADV_EVT_FAST_WHITELIST:
             NRF_LOG_INFO("Fast advertising with whitelist.");
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_WHITELIST);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_WHITELIST);
+//            APP_ERROR_CHECK(err_code);
             break;
 
         case BLE_ADV_EVT_SLOW_WHITELIST:
             NRF_LOG_INFO("Slow advertising with whitelist.");
-            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_WHITELIST);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_ADVERTISING_WHITELIST);
+//            APP_ERROR_CHECK(err_code);
             err_code = ble_advertising_restart_without_whitelist(&m_advertising);
             APP_ERROR_CHECK(err_code);
             break;
 
         case BLE_ADV_EVT_IDLE:
-            err_code = bsp_indication_set(BSP_INDICATE_IDLE);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_IDLE);
+//            APP_ERROR_CHECK(err_code);
             sleep_mode_enter();
             break;
 
@@ -927,13 +978,15 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
     {
         case BLE_GAP_EVT_CONNECTED:
             NRF_LOG_INFO("Connected");
-            err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
-            APP_ERROR_CHECK(err_code);
+//            err_code = bsp_indication_set(BSP_INDICATE_CONNECTED);
+//            APP_ERROR_CHECK(err_code);
 
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
 
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
+
+            sys.ble_conn = 1 ;
             break;
 
         case BLE_GAP_EVT_DISCONNECTED:
@@ -941,6 +994,8 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context)
             // LED indication will be changed when advertising starts.
 
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
+            
+            sys.ble_disconn = 1 ;
             break;
 
         case BLE_GAP_EVT_PHY_UPDATE_REQUEST:
@@ -1165,6 +1220,55 @@ static void mouse_movement_send(int16_t x_delta, int16_t y_delta)
         (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
        )
     {
+        NRF_LOG_INFO("err_code= %d",err_code );
+        //APP_ERROR_HANDLER(err_code);
+    }
+}
+
+/**@brief Function for sending a Mouse Motion.
+ *
+ * @param[in]   button   buttom motion.
+ */
+static void mouse_motion_send( uint8_t button )
+{
+    ret_code_t err_code;
+
+    if (m_in_boot_mode)
+    {
+        err_code = ble_hids_boot_mouse_inp_rep_send(&m_hids,
+                                                    button,
+                                                    0,
+                                                    0,
+                                                    0,
+                                                    NULL,
+                                                    m_conn_handle);
+    }
+    else
+    {
+        uint8_t buffer[INPUT_REP_BUTTONS_LEN];
+
+        APP_ERROR_CHECK_BOOL(INPUT_REP_BUTTONS_LEN == 3);
+
+
+
+        buffer[0] = button ;
+        buffer[1] = 0;
+        buffer[2] = 0;
+
+        err_code = ble_hids_inp_rep_send(&m_hids,
+                                         INPUT_REP_BUTTONS_INDEX,
+                                         INPUT_REP_BUTTONS_LEN,
+                                         buffer,
+                                         m_conn_handle);
+    }
+
+    if ((err_code != NRF_SUCCESS) &&
+        (err_code != NRF_ERROR_INVALID_STATE) &&
+        (err_code != NRF_ERROR_RESOURCES) &&
+        (err_code != NRF_ERROR_BUSY) &&
+        (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
+       )
+    {
         APP_ERROR_HANDLER(err_code);
     }
 }
@@ -1174,6 +1278,7 @@ static void mouse_movement_send(int16_t x_delta, int16_t y_delta)
  *
  * @param[in]   event   Event generated by button press.
  */
+/*
 static void bsp_event_handler(bsp_event_t event)
 {
     ret_code_t err_code;
@@ -1236,12 +1341,14 @@ static void bsp_event_handler(bsp_event_t event)
             break;
     }
 }
+*/
 
 
 /**@brief Function for initializing buttons and leds.
  *
  * @param[out] p_erase_bonds  Will be true if the clear bonding button was pressed to wake the application up.
  */
+/*
 static void buttons_leds_init(bool * p_erase_bonds)
 {
     ret_code_t err_code;
@@ -1256,7 +1363,7 @@ static void buttons_leds_init(bool * p_erase_bonds)
 
     *p_erase_bonds = (startup_event == BSP_EVENT_CLEAR_BONDING_DATA);
 }
-
+*/
 
 /**@brief Function for initializing the nrf log module.
  */
@@ -1292,7 +1399,117 @@ static void idle_state_handle(void)
     }
 }
 
+// gpio init
+void gpio_init(void)
+{
+    nrf_gpio_cfg_output( 17 );
+    nrf_gpio_pin_clear( 17 );
+}
 
+// gpiote init
+
+void in_pin_handler(uint8_t pin_no, uint8_t button_action)
+{
+    uint8_t buffer = 0;
+
+    switch( pin_no )
+    {
+      case LEFT :
+        NRF_LOG_INFO("gpiote pin LEFT event.%d",button_action);
+//        mouse_movement_send(20, 20);
+        mouse_motion_send( !button_action<<0 & 0x01 ) ;
+
+      break;
+
+      case RIGHT :
+        NRF_LOG_INFO("gpiote pin RIGHT event.%d",button_action);
+
+
+      break;
+
+      case MIDDLE :
+        NRF_LOG_INFO("gpiote pin MIDDLE event.%d",button_action);
+
+
+      break;
+
+      case FORWARD :
+        NRF_LOG_INFO("gpiote pin FORWARD event.%d",button_action);
+
+
+      break;
+
+      case BACKWARD :
+        NRF_LOG_INFO("gpiote pin BACKWARD event.");
+
+
+      break;
+
+      /*
+        add event on gpiote inetrrupt
+      */
+
+      default:
+      break;
+    }
+    
+}
+void button_init(void)
+{
+    uint32_t err_code = NRF_SUCCESS;
+
+    err_code = app_button_init((app_button_cfg_t *)app_buttons,
+                                  5,
+                                  APP_TIMER_TICKS(10));
+    APP_ERROR_CHECK(err_code);
+
+    err_code = app_button_enable();
+    APP_ERROR_CHECK(err_code);
+}
+
+// adc init
+// ADC
+#define ADC_VDD NRF_SAADC_INPUT_VDD	// VDD
+#define ADC_0 	NRF_SAADC_INPUT_AIN0	// P0.02
+#define ADC_1 	NRF_SAADC_INPUT_AIN1	// P0.03
+#define ADC_2 	NRF_SAADC_INPUT_AIN2	// P0.04
+#define ADC_3 	NRF_SAADC_INPUT_AIN3	// P0.05
+#define ADC_4 	NRF_SAADC_INPUT_AIN4	// P0.28
+#define ADC_5 	NRF_SAADC_INPUT_AIN5	// P0.29
+#define ADC_6 	NRF_SAADC_INPUT_AIN6	// P0.30
+#define ADC_7 	NRF_SAADC_INPUT_AIN7	// P0.31
+void saadc_init(void)
+{
+    // initial saadc_init
+    ret_code_t err_code = nrf_drv_saadc_init(NULL, NULL);
+    APP_ERROR_CHECK(err_code);
+    
+    nrf_saadc_channel_config_t battery =
+	NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(ADC_2);
+    
+    err_code = nrf_drv_saadc_channel_init(0, &battery);
+    APP_ERROR_CHECK(err_code);
+
+    nrf_saadc_channel_config_t joystick_x =
+	NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(ADC_0);
+    
+    err_code = nrf_drv_saadc_channel_init(1, &joystick_x);
+    APP_ERROR_CHECK(err_code);
+
+    nrf_saadc_channel_config_t joystick_y =
+	NRF_DRV_SAADC_DEFAULT_CHANNEL_CONFIG_SE(ADC_1);
+    
+    err_code = nrf_drv_saadc_channel_init(2, &joystick_y);
+    APP_ERROR_CHECK(err_code);
+
+//    err_code = nrf_drv_saadc_buffer_convert(&adc_buf[0], 1);
+//    APP_ERROR_CHECK(err_code);
+//
+//    err_code = nrf_drv_saadc_buffer_convert(&adc_buf[1], 1);
+//    APP_ERROR_CHECK(err_code);
+}
+
+int16_t conver_to_XY( int16_t move );
 /**@brief Function for application main entry.
  */
 int main(void)
@@ -1302,7 +1519,13 @@ int main(void)
     // Initialize.
     log_init();
     timers_init();
-    buttons_leds_init(&erase_bonds);
+    //buttons_leds_init(&erase_bonds);
+    // init
+    gpio_init();
+    button_init();
+    saadc_init();
+
+    //////
     power_management_init();
     ble_stack_init();
     scheduler_init();
@@ -1323,7 +1546,58 @@ int main(void)
     for (;;)
     {
         idle_state_handle();
+
+        if( sys.ble_conn )
+        {
+            sys.ble_conn = 0 ;
+            app_timer_start(m_joystick_timer_id, JOYSTICK_MEAS_INTERVAL, NULL);
+        }
+
+        if( sys.ble_disconn )
+        {
+            sys.ble_disconn = 0 ;
+            app_timer_stop(m_joystick_timer_id);
+        }
+
+        if( sys.joystick_xy )
+        {
+            sys.joystick_xy = 0 ;
+            
+            nrf_saadc_value_t joystick_xy[2] = {0,0};
+
+            nrfx_saadc_sample_convert( 1 , &joystick_xy[0]);
+            nrfx_saadc_sample_convert( 2 , &joystick_xy[1]);
+
+            joystick_xy[0] = -2*conver_to_XY(joystick_xy[0]);
+            joystick_xy[1] = 2*conver_to_XY(joystick_xy[1]);
+
+
+            NRF_LOG_INFO("%d %d",joystick_xy[0] ,joystick_xy[1] );
+
+
+            if( joystick_xy[0] != 0 || joystick_xy[1] != 0  )
+                mouse_movement_send(joystick_xy[0], joystick_xy[1]);
+        }
     }
+}
+
+int16_t conver_to_XY( int16_t move )
+{
+    int16_t scale = 0 , sign = 0 ; 
+    move += 50 ;
+    move >>= 2 ;
+    move -= 128 ;
+    sign = (move>=0)? 1:-1 ;
+
+    scale = abs( move );
+    
+    if( scale <= 20 )         return 0*sign ;
+    else if( scale <= 40 )    return 2*sign ;
+    else if( scale <= 60 )    return 4*sign ;
+    else if( scale <= 80 )    return 6*sign ;
+    else if( scale <= 100 )   return 8*sign ;
+    else                      return 10*sign ;
+
 }
 
 
