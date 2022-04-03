@@ -1509,12 +1509,21 @@ void saadc_init(void)
 //    APP_ERROR_CHECK(err_code);
 }
 
+void check_bond_erase(bool *erase_bonds)
+{
+    // check button
+    uint8_t pin_stat = nrf_gpio_pin_read(LEFT);
+
+    // set erase_bonds
+    *erase_bonds = !pin_stat;
+}
+
 int16_t conver_to_XY( int16_t move );
 /**@brief Function for application main entry.
  */
 int main(void)
 {
-    bool erase_bonds;
+    bool erase_bonds = false;
 
     // Initialize.
     log_init();
@@ -1524,6 +1533,7 @@ int main(void)
     gpio_init();
     button_init();
     saadc_init();
+    check_bond_erase(&erase_bonds);
 
     //////
     power_management_init();
