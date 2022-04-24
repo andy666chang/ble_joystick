@@ -7,6 +7,7 @@
 
 #include "app_timer.h"
 #include "nrf_drv_saadc.h"
+#include "nrf_delay.h"
 
 #define _DEBUG_LOG 0
 
@@ -46,13 +47,13 @@ extern volatile Flag sys ;
 #define PIN_FORWARD   28
 #define PIN_BACKWARD  27
 
-#define PIN_LED 17
+#define PIN_LED 13
 
 APP_TIMER_DEF(m_joystick_timer_id);                                                  /**< joystick timer. */
 #define JOYSTICK_MEAS_INTERVAL          APP_TIMER_TICKS(20)                       /**< JOYSTICK measurement interval (ticks). */
 
-static void (*mouse_movement_send_xy)(int16_t x_delta, int16_t y_delta);
-static void (*mouse_motion_send_button)( uint8_t button );
+void mouse_movement_send(int16_t x_delta, int16_t y_delta);
+void mouse_motion_send( uint8_t button );
 
 int8_t board_init(void);
 void check_bond(bool *erase_bonds);

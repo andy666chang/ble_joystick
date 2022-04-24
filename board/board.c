@@ -10,12 +10,14 @@
 #include "nrf_log_ctrl.h"
 #include "nrf_log_default_backends.h"
 
+
+
 volatile Flag sys={0,0,0};
 
 void in_pin_handler(uint8_t pin_no, uint8_t button_action);
 static const app_button_cfg_t app_buttons[5] =
 {
-    {PIN_LEFT     , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
+    {PIN_LEFT     , true , NRF_GPIO_PIN_NOPULL, in_pin_handler},
     {PIN_RIGHT    , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
     {PIN_MIDDLE   , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
     {PIN_FORWARD  , false, NRF_GPIO_PIN_PULLUP, in_pin_handler},
@@ -74,8 +76,7 @@ void in_pin_handler(uint8_t pin_no, uint8_t button_action)
     {
       case PIN_LEFT :
         NRF_LOG_INFO("gpiote pin LEFT event.%d",button_action);
-//        mouse_movement_send_xy(20, 20);
-        mouse_motion_send_button( !button_action<<0 & 0x01 ) ;
+        mouse_motion_send( button_action<<0 & 0x01 ) ;
 
       break;
 
@@ -163,7 +164,7 @@ void check_bond(bool *erase_bonds)
     uint8_t pin_stat = nrf_gpio_pin_read(PIN_LEFT);
 
     // set erase_bonds
-    *erase_bonds = !pin_stat;
+    *erase_bonds = pin_stat;
 
 #if _DEBUG_LOG
     // aleays clear bond
@@ -181,11 +182,11 @@ int16_t conver_to_XY( int16_t move )
 
     scale = abs( move );
     
-    if( scale <= 20 )         return 0*sign ;
-    else if( scale <= 40 )    return 2*sign ;
-    else if( scale <= 60 )    return 4*sign ;
-    else if( scale <= 80 )    return 6*sign ;
-    else if( scale <= 100 )   return 8*sign ;
+    if( scale <= 20 )         return  0*sign ;
+    else if( scale <= 40 )    return  2*sign ;
+    else if( scale <= 60 )    return  4*sign ;
+    else if( scale <= 80 )    return  6*sign ;
+    else if( scale <= 100 )   return  8*sign ;
     else                      return 10*sign ;
 }
 

@@ -213,7 +213,7 @@ static ble_gap_adv_data_t m_sp_advdata_buf =                                    
 #endif
 
 static void on_hids_evt(ble_hids_t * p_hids, ble_hids_evt_t * p_evt);
-static void mouse_movement_send(int16_t x_delta, int16_t y_delta);
+//static void mouse_movement_send(int16_t x_delta, int16_t y_delta);
 
 /**@brief Callback function for asserts in the SoftDevice.
  *
@@ -1143,7 +1143,7 @@ static void scheduler_init(void)
  * @param[in]   x_delta   Horizontal movement.
  * @param[in]   y_delta   Vertical movement.
  */
-static void mouse_movement_send(int16_t x_delta, int16_t y_delta)
+void mouse_movement_send(int16_t x_delta, int16_t y_delta)
 {
     ret_code_t err_code;
 
@@ -1196,7 +1196,7 @@ static void mouse_movement_send(int16_t x_delta, int16_t y_delta)
  *
  * @param[in]   button   buttom motion.
  */
-static void mouse_motion_send( uint8_t button )
+void mouse_motion_send( uint8_t button )
 {
     ret_code_t err_code;
 
@@ -1236,7 +1236,8 @@ static void mouse_motion_send( uint8_t button )
         (err_code != BLE_ERROR_GATTS_SYS_ATTR_MISSING)
        )
     {
-        APP_ERROR_HANDLER(err_code);
+        NRF_LOG_INFO("err_code= %d",err_code );
+        //APP_ERROR_HANDLER(err_code);
     }
 }
 
@@ -1380,10 +1381,6 @@ int main(void)
     // board init
     board_init();
     
-    // register mouse function
-    mouse_movement_send_xy = mouse_movement_send;
-    mouse_motion_send_button = mouse_motion_send;
-
     // check bonding behavior
     check_bond(&erase_bonds);
 
@@ -1430,30 +1427,29 @@ int main(void)
             nrfx_saadc_sample_convert( ADC_JOYSTICK_X_CH , &joystick_xy[0]);
             nrfx_saadc_sample_convert( ADC_JOYSTICK_Y_CH , &joystick_xy[1]);
 
-            joystick_xy[0] = -2 * conver_to_XY(joystick_xy[0]);
+            joystick_xy[0] = 2 * conver_to_XY(joystick_xy[0]);
             joystick_xy[1] = 2 * conver_to_XY(joystick_xy[1]);
 
 
             NRF_LOG_INFO("%d %d", joystick_xy[0] , joystick_xy[1] );
 
             if ( joystick_xy[0] != 0 || joystick_xy[1] != 0  )
-                mouse_movement_send_xy(joystick_xy[0], joystick_xy[1]);
+                mouse_movement_send(joystick_xy[0], joystick_xy[1]);
         }
 
 #if _DEBUG_LOG
         {
             nrf_saadc_value_t joystick_xy[2] = {0, 0};
+            int16_t delta[2] = {0, 0};
 
             nrfx_saadc_sample_convert( ADC_JOYSTICK_X_CH , &joystick_xy[0]);
             nrfx_saadc_sample_convert( ADC_JOYSTICK_Y_CH , &joystick_xy[1]);
 
-            NRF_LOG_INFO("adc= %d %d", joystick_xy[0] , joystick_xy[1] );
+            delta[0] = 2 * conver_to_XY(joystick_xy[0]);
+            delta[1] = 2 * conver_to_XY(joystick_xy[1]);
 
-            joystick_xy[0] = -2 * conver_to_XY(joystick_xy[0]);
-            joystick_xy[1] = 2 * conver_to_XY(joystick_xy[1]);
-
-            NRF_LOG_INFO("xy= %d %d", joystick_xy[0] , joystick_xy[1] );
-            nrf_delay_ms(500);
+            NRF_LOG_INFO("adc,xy= (%d, %d) (%d, %d)", joystick_xy[0] , joystick_xy[1], delta[0] , delta[1] );
+            nrf_delay_ms(100);
         }
 #endif
     }
