@@ -26,11 +26,32 @@ void gpio_init(void);
 void button_init(void);
 void saadc_init(void);
 
+void bsp_test()
+{
+    for(uint8_t i=1; i<=31; i++ )
+    {
+        if(i==9||i==10||i==21)
+            continue;
+        nrf_gpio_cfg_output( i );
+    }
+
+    while(1)
+    {
+        for(uint8_t i=1; i<=31; i++ )
+        {
+            if(i==9||i==10||i==21)
+                continue;
+            nrf_gpio_pin_toggle( i );
+        }
+        nrf_delay_ms(500);
+    }
+}
 
 int8_t board_init(void)
 {
     memset((void *)&sys, 0, sizeof(sys));
-    
+
+    //bsp_test();
     gpio_init();
     button_init();
     saadc_init();
